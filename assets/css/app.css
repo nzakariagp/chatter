@@ -103,3 +103,167 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --industrial-bg: #1e1e1e;
+  --industrial-surface: #252526;
+  --industrial-elevated: #2d2d30;
+  --industrial-border: #3e3e42;
+  --industrial-text: #cccccc;
+  --industrial-text-bright: #ffffff;
+  --industrial-text-dim: #858585;
+  --industrial-orange: #ff8c42;
+  --industrial-blue: #4fc3f7;
+  --industrial-green: #4caf50;
+  --industrial-red: #f44336;
+  --industrial-yellow: #ffca28;
+  --industrial-purple: #ab47bc;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.industrial-bg {
+  background: var(--industrial-bg);
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--industrial-text);
+}
+
+.industrial-surface {
+  background: var(--industrial-surface);
+  border: 1px solid var(--industrial-border);
+}
+
+.industrial-elevated {
+  background: var(--industrial-elevated);
+}
+
+.industrial-card {
+  background: var(--industrial-surface);
+  border: 1px solid var(--industrial-border);
+  transition: all 0.2s ease;
+}
+
+.industrial-card:hover {
+  border-color: var(--industrial-orange);
+  background: var(--industrial-elevated);
+}
+
+.industrial-input {
+  background: var(--industrial-bg);
+  border: 1px solid var(--industrial-border);
+  color: var(--industrial-text);
+  font-family: 'IBM Plex Mono', monospace;
+  transition: all 0.2s ease;
+}
+
+.industrial-input:focus {
+  outline: none;
+  border-color: var(--industrial-blue);
+  background: var(--industrial-surface);
+}
+
+.industrial-button {
+  background: var(--industrial-orange);
+  color: var(--industrial-bg);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.industrial-button:hover {
+  background: #ff9d5c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 140, 66, 0.3);
+}
+
+.industrial-button:active {
+  transform: translateY(0);
+}
+
+.status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--industrial-green);
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+.message-fade-in {
+  animation: slide-in-left 0.2s ease-out;
+}
+
+.industrial-accent-orange {
+  color: var(--industrial-orange);
+}
+
+.industrial-accent-blue {
+  color: var(--industrial-blue);
+}
+
+.industrial-accent-green {
+  color: var(--industrial-green);
+}
+
+.industrial-text-bright {
+  color: var(--industrial-text-bright);
+}
+
+.industrial-text-dim {
+  color: var(--industrial-text-dim);
+}
+
+.industrial-divider {
+  height: 1px;
+  background: var(--industrial-border);
+}
+
+.code-text {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.industrial-badge {
+  background: rgba(255, 140, 66, 0.15);
+  color: var(--industrial-orange);
+  border: 1px solid rgba(255, 140, 66, 0.3);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.industrial-sidebar {
+  background: var(--industrial-surface);
+  border-right: 1px solid var(--industrial-border);
+}

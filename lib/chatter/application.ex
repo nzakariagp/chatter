@@ -12,6 +12,7 @@ defmodule Chatter.Application do
       Chatter.Repo,
       {DNSCluster, query: Application.get_env(:chatter, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Chatter.PubSub},
+      ChatterWeb.Presence,
       # Start a worker by calling: Chatter.Worker.start_link(arg)
       # {Chatter.Worker, arg},
       # Start to serve requests, typically the last entry
