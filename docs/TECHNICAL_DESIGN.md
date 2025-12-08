@@ -188,9 +188,25 @@ defmodule Chatter.Chat do
 
   @doc """
   Returns the N most recent messages.
+  Queries in DESC order with limit for efficiency, then reverses for chronological display.
   """
-  def list_recent_messages(limit \\ 100) do
+  def list_recent_messages(limit \\ 500) do
     Message
+    |> order_by([m], desc: m.inserted_at)
+    |> limit(^limit)
+    |> preload(:user)
+    |> Repo.all()
+    |> Enum.reverse()
+  end
+
+  @doc """
+  Returns messages older than the given message ID for infinite scroll.
+  """
+  def list_messages_before(message_id, limit \\ 100) do
+    message = Repo.get!(Message, message_id)
+
+    Message
+    |> where([m], m.inserted_at < ^message.inserted_at)
     |> order_by([m], desc: m.inserted_at)
     |> limit(^limit)
     |> preload(:user)
@@ -299,7 +315,7 @@ end
 
 #### ChatterWeb.HomeLive
 
-**Purpose**: Landing page showing all users and join functionality
+**Purpose**: Landing page with link to chat room
 
 **Route**: `/`
 
@@ -309,75 +325,24 @@ end
 defmodule ChatterWeb.HomeLive do
   use ChatterWeb, :live_view
 
-  alias Chatter.Accounts
-  alias ChatterWeb.Presence
-
-  @presence_topic "presence:lobby"
-
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(Chatter.PubSub, @presence_topic)
-    end
-
-    users = Accounts.list_users()
-    presences = get_online_user_ids()
-
-    {:ok,
-     socket
-     |> assign(:users, users)
-     |> assign(:online_users, presences)
-     |> assign(:name, "")
-     |> assign(:error, nil)}
-  end
-
-  @impl true
-  def handle_event("join", %{"name" => name}, socket) do
-    name = String.trim(name)
-
-    case Accounts.get_or_create_user(name) do
-      {:ok, user} ->
-        {:noreply, push_navigate(socket, to: ~p"/chat/#{user.id}")}
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        error = translate_errors(changeset)
-        {:noreply, assign(socket, :error, error)}
-    end
-  end
-
-  @impl true
-  def handle_info(%{event: "presence_diff"}, socket) do
-    online_users = get_online_user_ids()
-    {:noreply, assign(socket, :online_users, online_users)}
-  end
-
-  defp get_online_user_ids do
-    @presence_topic
-    |> Presence.list()
-    |> Map.keys()
-    |> MapSet.new()
-  end
-
-  defp translate_errors(changeset) do
-    # Extract first error message
+    {:ok, socket}
   end
 end
 ```
 
-**State**:
-- `users` - All registered users
-- `online_users` - Set of online user IDs (from Presence)
-- `name` - Form input value
-- `error` - Validation error message
+**State**: Minimal - just a landing page with navigation to chat
 
-**Events**:
-- `join` - User submits name to join chat
+**Notes**:
+- Users are not tracked or created until they post their first message in chat
+- No user list on home page since users don't exist until first message
 
 #### ChatterWeb.ChatLive
 
 **Purpose**: Main chat room with messages and user list
 
-**Route**: `/chat/:user_id`
+**Route**: `/chat`
 
 **Template**: `chat_live.html.heex`
 
@@ -391,52 +356,94 @@ defmodule ChatterWeb.ChatLive do
   @presence_topic "presence:lobby"
 
   @impl true
-  def mount(%{"user_id" => user_id}, _session, socket) do
-    user = Accounts.get_user!(user_id)
-
+  def mount(_params, _session, socket) do
     if connected?(socket) do
       Chat.subscribe()
       Phoenix.PubSub.subscribe(Chatter.PubSub, @presence_topic)
-
-      {:ok, _} = Presence.track(self(), @presence_topic, user.id, %{
-        user_id: user.id,
-        name: user.name,
-        joined_at: System.system_time(:second)
-      })
     end
 
-    messages = Chat.list_recent_messages(100)
+    messages = Chat.list_recent_messages(500)
     users = Accounts.list_users()
     online_users = get_online_user_ids()
 
     {:ok,
      socket
-     |> assign(:current_user, user)
-     |> assign(:messages, messages)
+     |> assign(:current_user, nil)
      |> assign(:users, users)
      |> assign(:online_users, online_users)
-     |> assign_new(:form, fn ->
-       to_form(%{"content" => ""})
-     end)}
+     |> assign(:latest_message_id, get_latest_message_id(messages))
+     |> stream(:messages, messages)
+     |> assign(:form, to_form(%{"username" => "", "content" => ""}))}
   end
 
   @impl true
-  def handle_event("send_message", %{"content" => content}, socket) do
+  def handle_event("send_message", %{"username" => username, "content" => content}, socket) do
+    # Client-side throttling applied in JavaScript
+    username = String.trim(username)
     content = String.trim(content)
 
-    case Chat.create_message(socket.assigns.current_user, %{content: content}) do
-      {:ok, message} ->
-        Chat.broadcast_message(message)
-        {:noreply, assign(socket, :form, to_form(%{"content" => ""}))}
+    # First message: establish identity
+    cond do
+      socket.assigns.current_user == nil ->
+        # Validate username not in use by online user
+        case validate_and_create_user(username, socket.assigns.online_users) do
+          {:ok, user} ->
+            case Chat.create_message(user, %{content: content}) do
+              {:ok, message} ->
+                # Track presence for this user
+                Presence.track(self(), @presence_topic, user.id, %{
+                  user_id: user.id,
+                  name: user.name,
+                  joined_at: System.system_time(:second)
+                })
+                Chat.broadcast_message(message)
+                {:noreply,
+                 socket
+                 |> assign(:current_user, user)
+                 |> assign(:form, to_form(%{"username" => username, "content" => ""}))}
+              {:error, _changeset} ->
+                {:noreply, put_flash(socket, :error, "Message too long or invalid")}
+            end
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, reason)}
+        end
 
-      {:error, _changeset} ->
-        {:noreply, socket}
+      true ->
+        # Subsequent messages from identified user
+        case Chat.create_message(socket.assigns.current_user, %{content: content}) do
+          {:ok, message} ->
+            Chat.broadcast_message(message)
+            {:noreply, assign(socket, :form, to_form(%{"username" => username, "content" => ""}))}
+          {:error, _changeset} ->
+            {:noreply, socket}
+        end
     end
   end
 
   @impl true
+  def handle_event("load_more", _params, socket) do
+    # Infinite scroll: load older messages
+    oldest_message_id = get_oldest_message_id_from_stream(socket)
+    older_messages = Chat.list_messages_before(oldest_message_id, 100)
+
+    {:noreply, stream(socket, :messages, older_messages, at: 0)}
+  end
+
+  @impl true
+  def handle_event("leave", _params, socket) do
+    # Untrack presence and navigate home
+    if socket.assigns.current_user do
+      Presence.untrack(self(), @presence_topic, socket.assigns.current_user.id)
+    end
+    {:noreply, push_navigate(socket, to: ~p"/")}
+  end
+
+  @impl true
   def handle_info({:new_message, message}, socket) do
-    {:noreply, update(socket, :messages, fn messages -> messages ++ [message] end)}
+    {:noreply,
+     socket
+     |> stream_insert(:messages, message)
+     |> assign(:latest_message_id, message.id)}
   end
 
   @impl true
@@ -445,28 +452,67 @@ defmodule ChatterWeb.ChatLive do
     {:noreply, assign(socket, :online_users, online_users)}
   end
 
+  @impl true
+  def handle_info(:check_reconnect, socket) do
+    # After reconnect, fetch any missed messages
+    if socket.assigns.latest_message_id do
+      new_messages = Chat.list_messages_after(socket.assigns.latest_message_id)
+      {:noreply, stream(socket, :messages, new_messages)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp validate_and_create_user(username, online_user_ids) do
+    case Accounts.get_user_by_name(username) do
+      nil ->
+        # New user
+        Accounts.create_user(%{name: username})
+
+      user ->
+        # Existing user - check if online
+        if user.id in online_user_ids do
+          {:error, "Username already in use by online user"}
+        else
+          # Offline user, allow reuse (returning user)
+          {:ok, user}
+        end
+    end
+  end
+
   defp get_online_user_ids do
     @presence_topic
     |> Presence.list()
     |> Map.keys()
     |> MapSet.new()
   end
+
+  defp get_latest_message_id([]), do: nil
+  defp get_latest_message_id(messages), do: List.last(messages).id
 end
 ```
 
 **State**:
-- `current_user` - The logged-in user
-- `messages` - List of chat messages (with user preloaded)
-- `users` - All registered users
+- `current_user` - The identified user (nil until first message)
+- `messages` - Stream of chat messages (LiveView streams)
+- `users` - All registered users (stream for larger scale)
 - `online_users` - Set of online user IDs
-- `form` - Form for message input
+- `latest_message_id` - For reconnection recovery
+- `form` - Form for username + message input
 
 **Events**:
-- `send_message` - User sends a new message
+- `send_message` - User sends message (validates username on first message only)
+- `load_more` - Infinite scroll trigger
+- `leave` - User explicitly leaves chat
 
 **Info Messages**:
 - `{:new_message, message}` - From PubSub when anyone sends a message
 - `%{event: "presence_diff"}` - From Presence when users join/leave
+- `:check_reconnect` - Triggered after reconnection to fetch missed messages
+
+**Validation**:
+- Minimal validation on submit only
+- Client-side throttling to prevent spam
 
 ### 5. Router Configuration
 
@@ -569,29 +615,82 @@ Displays all users with online/offline indicators.
 
 ### Message List Component
 
-Displays chat messages with timestamps and usernames.
+Displays chat messages with timestamps and usernames using LiveView streams.
 
 ```heex
-<div class="messages">
-  <%= for message <- @messages do %>
-    <div class="message">
-      <span class="author"><%= message.user.name %></span>
-      <span class="timestamp"><%= format_timestamp(message.inserted_at) %></span>
-      <p class="content"><%= message.content %></p>
+<div id="messages" phx-update="stream" phx-hook="InfiniteScroll" class="messages">
+  <%= if Enum.empty?(@streams.messages) do %>
+    <div class="empty-state">
+      No messages yet. Start the conversation!
     </div>
   <% end %>
+
+  <div :for={{dom_id, message} <- @streams.messages} id={dom_id} class="message">
+    <span class="author"><%= message.user.name %></span>
+    <span class="timestamp"><%= relative_time(message.inserted_at) %></span>
+    <p class="content"><%= message.content %></p>
+  </div>
 </div>
+
+<%= if @online_users |> MapSet.size() == 1 do %>
+  <p class="text-gray-500 text-sm">
+    You're the only one here. Tell your friends about this chat!
+  </p>
+<% end %>
+```
+
+**Helper Function**:
+```elixir
+defp relative_time(datetime) do
+  diff = DateTime.diff(DateTime.utc_now(), datetime, :second)
+
+  cond do
+    diff < 60 -> "just now"
+    diff < 3600 -> "#{div(diff, 60)} minutes ago"
+    diff < 86400 -> "#{div(diff, 3600)} hours ago"
+    true -> "#{div(diff, 86400)} days ago"
+  end
+end
 ```
 
 ### Message Form Component
 
-Input form for sending new messages.
+Input form for username (first message) and message content.
 
 ```heex
-<.form for={@form} phx-submit="send_message">
-  <.input field={@form[:content]} type="text" placeholder="Type a message..." />
+<.form for={@form} phx-submit="send_message" id="message-form">
+  <%= if @current_user == nil do %>
+    <.input field={@form[:username]} type="text" placeholder="Enter username..." required />
+  <% end %>
+  <.input
+    field={@form[:content]}
+    type="text"
+    placeholder="Type a message..."
+    phx-hook="MessageThrottle"
+    required
+  />
   <.button>Send</.button>
 </.form>
+```
+
+**Client-side Throttling Hook**:
+```javascript
+// assets/js/app.js
+Hooks.MessageThrottle = {
+  mounted() {
+    let lastSubmit = 0;
+    const throttleMs = 500; // 500ms between messages
+
+    this.el.closest('form').addEventListener('submit', (e) => {
+      const now = Date.now();
+      if (now - lastSubmit < throttleMs) {
+        e.preventDefault();
+        return false;
+      }
+      lastSubmit = now;
+    });
+  }
+}
 ```
 
 ## Error Handling

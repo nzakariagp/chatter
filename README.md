@@ -16,30 +16,41 @@ Chatter is a demonstration application showcasing:
 
 ### Current Features
 
-1. **User Management**
-   - Join chat with a username (no authentication required)
-   - Automatic user creation on first join
-   - Persistent user records
+1. **Identity-Based User Management**
+   - Users establish identity by posting first message with username
+   - Prevents reuse of usernames by currently online users
+   - Offline users can reclaim their identity by posting again
+   - No authentication required - trust-based system
 
 2. **Real-time Chat**
    - Shared chat room for all users
-   - Instant message delivery to all connected users
-   - Complete message history on join
+   - Instant message delivery to all connected users via PubSub
+   - 500 most recent messages loaded on join
+   - Infinite scroll for accessing older message history
    - Messages persisted to PostgreSQL
+   - Client-side throttling to prevent spam (500ms between messages)
 
 3. **Presence Tracking**
    - Real-time online/offline status for all users
+   - Users become "online" after posting first message
    - Automatic presence updates when users join/leave
-   - Visible on both home page and in chat room
+   - Explicit leave button to untrack presence
+
+4. **Reconnection Recovery**
+   - Automatic recovery of missed messages after disconnect
+   - LiveView streams for memory-efficient message handling
 
 ### User Flow
 
-1. Visit home page to see all users and their online/offline status
-2. Enter a username to join (creates user if doesn't exist)
-3. Enter the shared chat room
-4. View all past messages
-5. Send messages that appear instantly for all users
-6. See users join and leave in real-time
+1. Visit home page with link to chat room
+2. Navigate to shared chat room
+3. Post first message with username to establish identity
+4. System validates username not in use by online users
+5. View 500 most recent messages (infinite scroll for older)
+6. Send messages (throttled to prevent spam)
+7. Messages appear instantly for all users via LiveView streams
+8. See users come online when they post their first message
+9. Click Leave button to explicitly exit chat
 
 ## Technology Stack
 
@@ -143,18 +154,29 @@ Comprehensive documentation is available in the `docs/` directory:
 
 ### Simplicity First
 - Single shared chat room (no multiple rooms or private messaging)
-- Minimal UI focused on functionality over aesthetics
-- No authentication system (username only)
+- Minimal UI with inline Tailwind CSS
+- Identity-based system: users post with username to join
+- No authentication - trust-based username verification
 
 ### Real-time Architecture
 - Phoenix LiveView handles WebSocket connections automatically
 - Phoenix.Presence provides distributed, fault-tolerant user tracking
 - Phoenix.PubSub enables efficient message broadcasting
+- LiveView streams for memory-efficient message collections
+- Client-side throttling (500ms) prevents message spam
 
 ### Data Model
 - UUIDs for primary keys (security and scalability)
 - Simple normalized schema (users and messages)
 - Indexed for common query patterns
+- DESC queries with limits for efficiency, reversed for display
+
+### User Experience
+- Relative timestamps ("2 minutes ago")
+- Empty state messaging
+- Lonely user encouragement ("Tell your friends!")
+- Infinite scroll for message history
+- Reconnection recovery for missed messages
 
 ### OTP Principles
 - Proper supervision tree with `:one_for_one` strategy
@@ -174,7 +196,9 @@ Comprehensive documentation is available in the `docs/` directory:
 - No private messaging
 - No file uploads (text only)
 - No search functionality
-- No rate limiting
+- Client-side throttling only (no server-side rate limiting)
+- User list loaded from database (for large scale, consider GenServer cache)
+- Initial load limited to 500 most recent messages
 
 See [ASSUMPTIONS.md](docs/ASSUMPTIONS.md) for complete list and rationale.
 

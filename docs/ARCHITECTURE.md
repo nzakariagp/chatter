@@ -196,32 +196,43 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 
 ### User Joins Chat
 ```
-1. User enters name on HomeLive
-2. HomeLive validates name, creates/finds user
-3. Redirect to ChatLive with user_id
-4. ChatLive mounts, tracks presence
-5. Presence broadcasts presence_diff
-6. All clients receive update and re-render user list
+1. User navigates to ChatLive (shared chat room URL)
+2. ChatLive mounts, subscribes to topics
+3. User posts first message with username
+4. System validates username availability (prevent reuse of online users)
+5. User record created/retrieved (offline users can be reused)
+6. Message created and user tracked in Presence
+7. Presence broadcasts presence_diff
+8. All clients receive update and re-render user list
 ```
 
 ### Sending a Message
 ```
-1. User types message, submits form
-2. ChatLive.handle_event("send_message", ...)
+1. User types message, submits form (client-side throttled)
+2. ChatLive.handle_event("send_message", ...) validates on submit
 3. Chatter.Chat.create_message(user, content)
 4. Message persisted to PostgreSQL
 5. Chatter.Chat.broadcast_message(message)
 6. All ChatLive processes receive {:new_message, message}
-7. Each process updates state, LiveView re-renders
+7. Each process streams message (via LiveView streams), LiveView re-renders
 ```
 
 ### User Goes Offline
 ```
-1. WebSocket connection drops
-2. LiveView process terminates
-3. Presence automatically untracks user
-4. Presence broadcasts presence_diff
-5. All clients receive update and mark user offline
+1. User clicks Leave button or WebSocket connection drops
+2. If Leave button: untrack presence explicitly, navigate to home
+3. If disconnect: LiveView process terminates automatically
+4. Presence automatically untracks user
+5. Presence broadcasts presence_diff
+6. All clients receive update and mark user offline
+```
+
+### User Reconnects After Disconnect
+```
+1. WebSocket reconnects, LiveView remounts
+2. ChatLive retrieves messages created after latest message in state
+3. Missing messages streamed to catch up
+4. User continues from where they left off
 ```
 
 ## OTP Supervision Tree
@@ -280,10 +291,13 @@ Chatter.Application (Supervisor)
 
 ## Performance Characteristics
 
-- **Message Load**: O(n) where n = number of messages displayed
-- **User List**: O(m) where m = number of total users
+- **Message Load**: O(n) where n = 500 initial messages, infinite scroll for older
+- **User List**: O(m) where m = number of total users (acceptable for expected scale)
+  - **Alternative**: GenServer-based cache for larger scale
 - **Real-time Updates**: O(1) per client via PubSub
 - **Database Queries**: Minimized via proper preloading and indexing
+- **LiveView Streams**: Memory-efficient collection handling
+- **Client-side Throttling**: Prevents message spam
 
 ## Assumptions & Trade-offs
 

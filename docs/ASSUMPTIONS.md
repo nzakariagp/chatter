@@ -14,9 +14,15 @@ This document outlines all assumptions made during the design and implementation
 - Same username = same user across sessions
 - No email, profile, or personal information collected
 
+**Identity Verification**: Users post their first message with their username to establish identity
+- Users do not appear in the online list until they post a message
+- Returning users must post a message again to become "online"
+- Username reuse is prevented for currently "online" users
+- If username matches an "offline" user, assume returning user with same identity
+
 **Rationale**: Simplifies implementation while meeting requirement of "a visitor can enter a name to join"
 
-**Trade-off**: No user verification, potential for impersonation
+**Trade-off**: Users must actively post to be recognized as online
 
 **Alternative Considered**: Anonymous users with session-only names (rejected because requirement says "create user if doesn't exist" implies persistence)
 
@@ -36,35 +42,39 @@ This document outlines all assumptions made during the design and implementation
 
 ### 3. Message History
 
-**Assumption**: All users see complete message history
+**Assumption**: All users see message history with infinite scroll
 
 **Requirements state**:
 - "Show all past chat messages"
 - No mention of limiting history or pagination
 
-**Implementation Decision**: Load last 100 messages on mount, but keep all messages available via database query
+**Implementation Decision**: Load last 500 messages on mount with infinite scroll for older messages
 
 **Rationale**:
-- Prevents memory issues with unlimited message loading
-- Provides reasonable history for demonstration
-- Easy to adjust limit or add pagination later
+- Prevents memory issues with unlimited message loading on mount
+- Provides substantial history for most use cases
+- Infinite scroll allows access to complete history without initial load penalty
+- Uses LiveView streams for efficient collection handling
 
-**Trade-off**: Very long chat histories won't fully load (future: add "load more" button)
+**Trade-off**: Initial load limited to 500 most recent messages, but all history accessible via scroll
 
 ### 4. Online/Offline Status
 
-**Assumption**: Online status is connection-based, not presence-based
+**Assumption**: Online status is message-based, not just connection-based
 
-**Implementation**: User is "online" when they have an active WebSocket connection in the chat room
+**Implementation**: User is "online" when they have posted a message in the current session
 
 **Behavior**:
-- User becomes online when they join chat room (not just visiting home page)
+- User becomes online after posting their first message (which includes username)
 - User goes offline when WebSocket disconnects
+- Returning users must post again to appear online
 - No "away" or "idle" status
 
 **Rationale**:
 - Phoenix.Presence provides robust connection tracking
 - Automatically handles disconnects and network issues
+- Identity verified through message posting
+- Prevents impersonation of currently online users
 - Fits requirement of "show online/offline status"
 
 **Alternative Considered**: Make users online on home page (rejected because requirement says "enter a shared chat room")
@@ -206,15 +216,17 @@ validate_length(:content, min: 1, max: 1000)
 
 **Design Implications**:
 - Single database instance sufficient
-- No caching layer needed
-- Simple queries without optimization
+- LiveView streams used for efficient collection handling
+- User list loaded from database (acceptable for expected scale)
 - No partitioning or sharding
+
+**Alternative Architecture**: For larger scale, implement GenServer to maintain running track of all users for quick retrieval by clients instead of database queries
 
 **If Scale Exceeds Assumptions**:
 - Add read replicas
-- Implement Redis caching for user list
-- Add pagination for messages
+- Implement GenServer-based user list cache
 - Consider message archival strategy
+- Add database partitioning
 
 ### 14. Deployment Model
 
@@ -243,8 +255,11 @@ validate_length(:content, min: 1, max: 1000)
 - Format validation on usernames
 - Ecto parameterized queries prevent SQL injection
 
+**Implemented**:
+- Client-side message throttling to prevent spam
+
 **Not Implemented**:
-- Rate limiting (could add with Hammer library)
+- Server-side rate limiting (could add with Hammer library)
 - IP-based blocking
 - Content filtering/profanity detection
 
@@ -282,16 +297,22 @@ validate_length(:content, min: 1, max: 1000)
 
 **Interpretation**:
 - Focus on functionality, not aesthetics
-- Use basic HTML/CSS
+- Use inline Tailwind CSS classes, avoid custom CSS
 - Leverage Phoenix core_components where appropriate
 - No JavaScript beyond LiveView's built-in JS
 - No external UI frameworks (no need for React, Vue, etc.)
 
 **Design Approach**:
 - Clean, readable layout
-- Clear visual indicators for online/offline
+- Clear visual indicators for online/offline (CSS-based)
 - Obvious user interactions (buttons, forms)
 - Responsive but not mobile-optimized
+- Relative timestamp format for messages (e.g., "2 minutes ago")
+
+**Empty States**:
+- No users until first message posted
+- Show empty message history when no messages exist
+- If user is only person online, display message: "Tell your friends about this chat!"
 
 ### 19. Browser Support
 
@@ -335,11 +356,14 @@ validate_length(:content, min: 1, max: 1000)
 - LiveView interactions
 - Presence behavior
 - Database operations
+- Form validation (minimal validation on submit only)
 
 **Lower Priority**:
 - UI rendering details
 - Error page rendering
 - Configuration loading
+
+**Note**: Advanced test partitioning (MIX_TEST_PARTITION) available but not required for standard development
 
 ### 22. Testing Environment
 
@@ -368,15 +392,16 @@ validate_length(:content, min: 1, max: 1000)
 
 ### 24. Message Load Strategy
 
-**Decision**: Load last 100 messages on mount
+**Decision**: Load last 500 messages on mount with infinite scroll
 
 **Rationale**:
 - Balances history visibility with performance
 - Prevents memory issues with thousands of messages
 - Fast initial page load
-- Sufficient for demonstration
+- Infinite scroll provides access to complete history
+- LiveView streams ensure efficient memory usage
 
-**Alternative**: Could implement infinite scroll or pagination
+**Reconnection Strategy**: On WebSocket reconnection, retrieve any messages created after the latest message in current LiveView state to catch up on missed messages
 
 ### 25. Database Query Optimization
 

@@ -81,15 +81,18 @@ mix test test/chatter/accounts_test.exs
 - [ ] Create `lib/chatter/chat.ex`
 - [ ] Implement functions:
   - `list_messages/0`
-  - `list_recent_messages/1`
+  - `list_recent_messages/1` - default 500 messages
+  - `list_messages_before/2` - for infinite scroll
+  - `list_messages_after/1` - for reconnection recovery
   - `create_message/2`
   - `subscribe/0`
   - `broadcast_message/1`
 - [ ] Write tests in `test/chatter/chat_test.exs`
   - Test message creation
   - Test user association
-  - Test validations
+  - Test validations (minimal, on submit only)
   - Test queries with preloading
+  - Test infinite scroll queries
 
 **Files to create/modify**:
 - `lib/chatter/chat.ex`
@@ -157,32 +160,23 @@ mix test
 
 ## Phase 3: Home Page (User Landing)
 
-**Goal**: Build landing page where users can see all users and join chat
+**Goal**: Build minimal landing page with link to chat
 
 ### Tasks
 
 #### 3.1 Create HomeLive Module
 - [ ] Create `lib/chatter_web/live/home_live.ex`
-- [ ] Implement `mount/3`:
-  - Load all users from database
-  - Subscribe to presence topic
-  - Initialize form state
-- [ ] Implement `handle_event("join", ...)`:
-  - Validate username
-  - Get or create user
-  - Navigate to chat page
-- [ ] Implement `handle_info` for presence diffs:
-  - Update online users list
+- [ ] Implement minimal `mount/3`
+- [ ] No user tracking or forms (users created in chat on first message)
 
 **Files to create/modify**:
 - `lib/chatter_web/live/home_live.ex`
 
 #### 3.2 Create HomeLive Template
 - [ ] Create `lib/chatter_web/live/home_live.html.heex`
-- [ ] Display page title
-- [ ] Show list of all users with online/offline indicators
-- [ ] Add form for entering username
-- [ ] Display validation errors if any
+- [ ] Display welcome message
+- [ ] Add link/button to navigate to chat
+- [ ] Use inline Tailwind CSS
 
 **Files to create/modify**:
 - `lib/chatter_web/live/home_live.html.heex`
@@ -196,10 +190,8 @@ mix test
 
 #### 3.4 Test HomeLive
 - [ ] Create `test/chatter_web/live/home_live_test.exs`
-- [ ] Test mounting and rendering user list
-- [ ] Test joining with valid username
-- [ ] Test joining with invalid username
-- [ ] Test presence updates
+- [ ] Test mounting and rendering
+- [ ] Test navigation link exists
 
 **Files to create/modify**:
 - `test/chatter_web/live/home_live_test.exs`
@@ -220,30 +212,40 @@ mix test
 
 ## Phase 4: Chat Room
 
-**Goal**: Build main chat interface with messages and real-time updates
+**Goal**: Build main chat interface with messages, identity verification, and real-time updates
 
 ### Tasks
 
 #### 4.1 Create ChatLive Module
 - [ ] Create `lib/chatter_web/live/chat_live.ex`
 - [ ] Implement `mount/3`:
-  - Get user from params
-  - Load recent messages
+  - Load recent 500 messages using LiveView streams
   - Load all users
   - Subscribe to chat topic
   - Subscribe to presence topic
-  - Track current user presence
-  - Initialize message form
+  - Initialize form with username + content fields
+  - Set current_user to nil (identified on first message)
 - [ ] Implement `handle_event("send_message", ...)`:
-  - Validate message
-  - Create message in database
+  - First message: validate username, check not in use by online users
+  - Create/retrieve user (allow reuse of offline users)
+  - Track presence after first message
+  - Minimal validation on submit only
   - Broadcast message to all clients
-  - Reset form
+  - Reset form (verify form reset clears browser input)
+- [ ] Implement `handle_event("load_more", ...)`:
+  - Infinite scroll for older messages
+  - Stream older messages at beginning
+- [ ] Implement `handle_event("leave", ...)`:
+  - Untrack presence explicitly
+  - Navigate to home page
 - [ ] Implement `handle_info({:new_message, ...})`:
-  - Append message to list
-  - Re-render messages
+  - Stream insert message
+  - Update latest_message_id
 - [ ] Implement `handle_info` for presence diffs:
   - Update online users list
+- [ ] Implement `handle_info(:check_reconnect)`:
+  - Fetch messages created after latest_message_id
+  - Stream missed messages
 - [ ] Implement `terminate/2`:
   - Cleanup (presence auto-untracks)
 
@@ -252,32 +254,53 @@ mix test
 
 #### 4.2 Create ChatLive Template
 - [ ] Create `lib/chatter_web/live/chat_live.html.heex`
-- [ ] Display current user name
-- [ ] Show user list with online/offline indicators
-- [ ] Display all messages with:
+- [ ] Show username input field (only if current_user is nil)
+- [ ] Display user list with online/offline indicators (CSS-based)
+- [ ] Display messages using LiveView streams (phx-update="stream")
+- [ ] Messages include:
   - Username
-  - Timestamp
+  - Relative timestamp ("2 minutes ago")
   - Content
-- [ ] Add message input form
+- [ ] Empty state: "No messages yet. Start the conversation!"
+- [ ] Lonely user message: "Tell your friends about this chat!" (if only 1 online)
+- [ ] Add message input form with client-side throttling hook
 - [ ] Add "Leave" button to return to home
+- [ ] Use inline Tailwind CSS throughout
 
 **Files to create/modify**:
 - `lib/chatter_web/live/chat_live.html.heex`
 
 #### 4.3 Add Route
 - [ ] Update `lib/chatter_web/router.ex`
-- [ ] Add route: `live "/chat/:user_id", ChatLive`
+- [ ] Add route: `live "/chat", ChatLive`
 
 **Files to create/modify**:
 - `lib/chatter_web/router.ex`
 
+#### 4.3.1 Add Client-side Throttling
+- [ ] Update `assets/js/app.js`
+- [ ] Add MessageThrottle hook (500ms throttle)
+- [ ] Register hook with LiveSocket
+
+**Files to create/modify**:
+- `assets/js/app.js`
+
 #### 4.4 Test ChatLive
 - [ ] Create `test/chatter_web/live/chat_live_test.exs`
-- [ ] Test mounting and loading messages
-- [ ] Test sending messages
-- [ ] Test receiving broadcast messages
-- [ ] Test presence tracking
+- [ ] Test mounting and loading 500 messages via streams
+- [ ] Test first message with username (identity establishment)
+- [ ] Test username validation (prevent reuse of online users)
+- [ ] Test username reuse of offline users
+- [ ] Test subsequent messages (no username field)
+- [ ] Test receiving broadcast messages via streams
+- [ ] Test presence tracking after first message
+- [ ] Test infinite scroll (load_more event)
+- [ ] Test leave button (untrack and navigate)
+- [ ] Test reconnection (missed message recovery)
 - [ ] Test multiple users in same chat
+- [ ] Test form reset clears inputs
+- [ ] Test empty state rendering
+- [ ] Test lonely user message
 
 **Files to create/modify**:
 - `test/chatter_web/live/chat_live_test.exs`
@@ -287,6 +310,9 @@ mix test
 mix test test/chatter_web/live/chat_live_test.exs
 mix phx.server
 # Open multiple browser tabs, test real-time updates
+# Test username reuse scenarios
+# Test infinite scroll
+# Test reconnection after disconnect
 ```
 
 **Phase 4 Checkpoint**:
@@ -298,28 +324,29 @@ mix test
 
 ## Phase 5: UI Styling
 
-**Goal**: Add minimal CSS for usable interface
+**Goal**: Add minimal inline Tailwind CSS for usable interface
 
 ### Tasks
 
-#### 5.1 Add Custom Styles
-- [ ] Update `assets/css/app.css`
-- [ ] Add styles for:
-  - User list container
-  - Online/offline indicators (green/gray dots)
-  - Message list (scrollable)
-  - Message items (username, timestamp, content)
-  - Input form
-  - Buttons
-  - Layout (flexbox/grid)
+#### 5.1 Apply Inline Tailwind Styles
+- [ ] Avoid custom CSS - use inline Tailwind throughout
+- [ ] Style user list container
+- [ ] Style online/offline indicators (CSS-based circles)
+- [ ] Style message list (scrollable with streams)
+- [ ] Style message items (username, relative timestamp, content)
+- [ ] Style username + message input form
+- [ ] Style buttons (Send, Leave)
+- [ ] Style empty states
+- [ ] Style layout (flexbox/grid)
 
 **Files to create/modify**:
-- `assets/css/app.css`
+- `lib/chatter_web/live/home_live.html.heex`
+- `lib/chatter_web/live/chat_live.html.heex`
 
 #### 5.2 Update Components
 - [ ] Use core_components where appropriate
 - [ ] Ensure proper semantic HTML
-- [ ] Add ARIA labels for accessibility
+- [ ] Verify relative timestamp helper function performance
 
 **Files to create/modify**:
 - `lib/chatter_web/live/home_live.html.heex`
@@ -329,6 +356,9 @@ mix test
 ```bash
 mix phx.server
 # Manually test UI in browser
+# Verify timestamps display correctly
+# Check empty states
+# Test responsive layout
 ```
 
 **Phase 5 Checkpoint**:
