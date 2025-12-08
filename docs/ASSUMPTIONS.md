@@ -14,17 +14,18 @@ This document outlines all assumptions made during the design and implementation
 - Same username = same user across sessions
 - No email, profile, or personal information collected
 
-**Identity Verification**: Users post their first message with their username to establish identity
-- Users do not appear in the online list until they post a message
-- Returning users must post a message again to become "online"
+**Identity Verification**: Users enter username on landing page to establish identity
+- Username entry creates/retrieves user and tracks presence immediately
+- Users become "online" upon successful username entry
 - Username reuse is prevented for currently "online" users
 - If username matches an "offline" user, assume returning user with same identity
+- After username entry, user navigates to chat room automatically
 
-**Rationale**: Simplifies implementation while meeting requirement of "a visitor can enter a name to join"
+**Rationale**: Simplifies user flow - single step to join chat
 
-**Trade-off**: Users must actively post to be recognized as online
+**Trade-off**: Users are tracked as online even before sending first message
 
-**Alternative Considered**: Anonymous users with session-only names (rejected because requirement says "create user if doesn't exist" implies persistence)
+**Alternative Considered**: Username entry on first message (rejected for better UX - separates identity from messaging)
 
 ### 2. Chat Room Structure
 
@@ -60,24 +61,26 @@ This document outlines all assumptions made during the design and implementation
 
 ### 4. Online/Offline Status
 
-**Assumption**: Online status is message-based, not just connection-based
+**Assumption**: Online status is connection-based and tracked from username entry
 
-**Implementation**: User is "online" when they have posted a message in the current session
+**Implementation**: User is "online" when they successfully enter username on landing page
 
 **Behavior**:
-- User becomes online after posting their first message (which includes username)
-- User goes offline when WebSocket disconnects
-- Returning users must post again to appear online
+- User becomes online upon successful username entry on landing page
+- Presence tracking begins immediately after username validation
+- User goes offline when WebSocket disconnects or they click "Leave"
+- Both landing page and chat page receive real-time presence updates
 - No "away" or "idle" status
 
 **Rationale**:
 - Phoenix.Presence provides robust connection tracking
 - Automatically handles disconnects and network issues
-- Identity verified through message posting
+- Identity verified on landing page before entering chat
 - Prevents impersonation of currently online users
+- All pages show real-time online/offline status updates
 - Fits requirement of "show online/offline status"
 
-**Alternative Considered**: Make users online on home page (rejected because requirement says "enter a shared chat room")
+**Alternative Considered**: Track presence only after first message (rejected for better UX)
 
 ## Technical Decisions
 

@@ -315,7 +315,7 @@ end
 
 #### ChatterWeb.HomeLive
 
-**Purpose**: Landing page with link to chat room
+**Purpose**: Landing page with username entry and user list display
 
 **Route**: `/`
 
@@ -325,18 +325,87 @@ end
 defmodule ChatterWeb.HomeLive do
   use ChatterWeb, :live_view
 
+  alias Chatter.Accounts
+  alias ChatterWeb.Presence
+
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket}
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
+    end
+
+    users = Accounts.list_users()
+    online_users = get_online_usernames()
+
+    {:ok,
+     socket
+     |> assign(:users, users)
+     |> assign(:online_users, online_users)
+     |> assign(:total_users, length(users))
+     |> assign(:online_count, length(online_users))
+     |> assign(:username_form, to_form(%{"name" => ""}))}
+  end
+
+  @impl true
+  def handle_event("set_username", %{"name" => name}, socket) do
+    name = String.trim(name)
+
+    case validate_and_create_user(name, socket.assigns.online_users) do
+      {:ok, user} ->
+        Presence.track(self(), "chat:presence", user.id, %{
+          name: user.name,
+          joined_at: System.system_time(:second)
+        })
+
+        {:noreply, push_navigate(socket, to: ~p"/chat")}
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  @impl true
+  def handle_info(%{event: "presence_diff"}, socket) do
+    online_users = get_online_usernames()
+    users = Accounts.list_users()
+
+    {:noreply,
+     socket
+     |> assign(:users, users)
+     |> assign(:online_users, online_users)
+     |> assign(:total_users, length(users))
+     |> assign(:online_count, length(online_users))}
+  end
+
+  defp get_online_usernames do
+    Presence.list("chat:presence")
+    |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
+    |> Enum.sort()
+  end
+
+  defp validate_and_create_user(name, online_users) do
+    cond do
+      name == "" -> {:error, "Username cannot be empty"}
+      name in online_users -> {:error, "Username '#{name}' is already taken"}
+      true -> Accounts.get_or_create_user(name)
+    end
   end
 end
 ```
 
-**State**: Minimal - just a landing page with navigation to chat
+**State**:
+- `users` - All registered users from database
+- `online_users` - Currently online usernames from presence
+- `total_users` - Count of all users
+- `online_count` - Count of online users
+- `username_form` - Form for username entry
 
-**Notes**:
-- Users are not tracked or created until they post their first message in chat
-- No user list on home page since users don't exist until first message
+**Features**:
+- Real-time user list with online/offline indicators
+- Username validation before entry
+- Automatic presence tracking on successful username entry
+- Dynamic updates when users come online or go offline
+- User count displays
 
 #### ChatterWeb.ChatLive
 
@@ -377,46 +446,21 @@ defmodule ChatterWeb.ChatLive do
   end
 
   @impl true
-  def handle_event("send_message", %{"username" => username, "content" => content}, socket) do
-    # Client-side throttling applied in JavaScript
-    username = String.trim(username)
+  def handle_event("send_message", %{"content" => content}, socket) do
     content = String.trim(content)
 
-    # First message: establish identity
-    cond do
-      socket.assigns.current_user == nil ->
-        # Validate username not in use by online user
-        case validate_and_create_user(username, socket.assigns.online_users) do
-          {:ok, user} ->
-            case Chat.create_message(user, %{content: content}) do
-              {:ok, message} ->
-                # Track presence for this user
-                Presence.track(self(), @presence_topic, user.id, %{
-                  user_id: user.id,
-                  name: user.name,
-                  joined_at: System.system_time(:second)
-                })
-                Chat.broadcast_message(message)
-                {:noreply,
-                 socket
-                 |> assign(:current_user, user)
-                 |> assign(:form, to_form(%{"username" => username, "content" => ""}))}
-              {:error, _changeset} ->
-                {:noreply, put_flash(socket, :error, "Message too long or invalid")}
-            end
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, reason)}
-        end
+    if socket.assigns.current_user && content != "" do
+      case Chat.create_message(socket.assigns.current_user, %{content: content}) do
+        {:ok, message} ->
+          Chat.broadcast_message(message)
+          # Clear input field and restore placeholder
+          {:noreply, assign(socket, :message_form, to_form(%{"content" => ""}))}
 
-      true ->
-        # Subsequent messages from identified user
-        case Chat.create_message(socket.assigns.current_user, %{content: content}) do
-          {:ok, message} ->
-            Chat.broadcast_message(message)
-            {:noreply, assign(socket, :form, to_form(%{"username" => username, "content" => ""}))}
-          {:error, _changeset} ->
-            {:noreply, socket}
-        end
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to send message")}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
@@ -424,9 +468,13 @@ defmodule ChatterWeb.ChatLive do
   def handle_event("load_more", _params, socket) do
     # Infinite scroll: load older messages
     oldest_message_id = get_oldest_message_id_from_stream(socket)
-    older_messages = Chat.list_messages_before(oldest_message_id, 100)
 
-    {:noreply, stream(socket, :messages, older_messages, at: 0)}
+    if oldest_message_id do
+      older_messages = Chat.list_messages_before(oldest_message_id, 100)
+      {:noreply, stream(socket, :messages, older_messages, at: 0)}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -435,6 +483,7 @@ defmodule ChatterWeb.ChatLive do
     if socket.assigns.current_user do
       Presence.untrack(self(), @presence_topic, socket.assigns.current_user.id)
     end
+
     {:noreply, push_navigate(socket, to: ~p"/")}
   end
 
@@ -448,43 +497,21 @@ defmodule ChatterWeb.ChatLive do
 
   @impl true
   def handle_info(%{event: "presence_diff"}, socket) do
-    online_users = get_online_user_ids()
-    {:noreply, assign(socket, :online_users, online_users)}
+    online_users = get_online_usernames()
+    users = Accounts.list_users()
+
+    {:noreply,
+     socket
+     |> assign(:users, users)
+     |> assign(:online_users, online_users)
+     |> assign(:total_users, length(users))
+     |> assign(:online_count, length(online_users))}
   end
 
-  @impl true
-  def handle_info(:check_reconnect, socket) do
-    # After reconnect, fetch any missed messages
-    if socket.assigns.latest_message_id do
-      new_messages = Chat.list_messages_after(socket.assigns.latest_message_id)
-      {:noreply, stream(socket, :messages, new_messages)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  defp validate_and_create_user(username, online_user_ids) do
-    case Accounts.get_user_by_name(username) do
-      nil ->
-        # New user
-        Accounts.create_user(%{name: username})
-
-      user ->
-        # Existing user - check if online
-        if user.id in online_user_ids do
-          {:error, "Username already in use by online user"}
-        else
-          # Offline user, allow reuse (returning user)
-          {:ok, user}
-        end
-    end
-  end
-
-  defp get_online_user_ids do
-    @presence_topic
-    |> Presence.list()
-    |> Map.keys()
-    |> MapSet.new()
+  defp get_online_usernames do
+    Presence.list(@presence_topic)
+    |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
+    |> Enum.sort()
   end
 
   defp get_latest_message_id([]), do: nil
@@ -493,26 +520,33 @@ end
 ```
 
 **State**:
-- `current_user` - The identified user (nil until first message)
+- `current_user` - The identified user (retrieved from session/params, already authenticated from HomeLive)
 - `messages` - Stream of chat messages (LiveView streams)
-- `users` - All registered users (stream for larger scale)
-- `online_users` - Set of online user IDs
+- `users` - All registered users from database
+- `online_users` - List of online usernames from presence
+- `total_users` - Count of all registered users
+- `online_count` - Count of currently online users
 - `latest_message_id` - For reconnection recovery
-- `form` - Form for username + message input
+- `message_form` - Form for message input only (username already set)
 
 **Events**:
-- `send_message` - User sends message (validates username on first message only)
-- `load_more` - Infinite scroll trigger
-- `leave` - User explicitly leaves chat
+- `send_message` - User sends message (current_user already set)
+  - Clears input field after successful send
+  - Restores placeholder "type your message here..."
+- `load_more` - Infinite scroll trigger for older messages
+- `leave` - User explicitly leaves chat (untracks presence, navigates home)
 
 **Info Messages**:
 - `{:new_message, message}` - From PubSub when anyone sends a message
 - `%{event: "presence_diff"}` - From Presence when users join/leave
-- `:check_reconnect` - Triggered after reconnection to fetch missed messages
+  - Updates both user list and online count dynamically
 
-**Validation**:
-- Minimal validation on submit only
-- Client-side throttling to prevent spam
+**Features**:
+- Real-time message delivery via streams
+- Dynamic user list with online/offline indicators
+- User count displays (total and online)
+- Input field cleared after each message
+- Placeholder text for better UX
 
 ### 5. Router Configuration
 

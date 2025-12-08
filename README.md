@@ -16,41 +16,58 @@ Chatter is a demonstration application showcasing:
 
 ### Current Features
 
-1. **Identity-Based User Management**
-   - Users establish identity by posting first message with username
-   - Prevents reuse of usernames by currently online users
-   - Offline users can reclaim their identity by posting again
-   - No authentication required - trust-based system
+1. **Landing Page with User List**
+   - View all registered users with online/offline indicators
+   - See total user count and online user count
+   - Real-time updates when users come online or go offline
+   - Username entry form for joining chat
 
-2. **Real-time Chat**
+2. **Identity-Based User Management**
+   - Users establish identity by entering username on landing page
+   - Prevents reuse of usernames by currently online users
+   - Offline users can reclaim their identity
+   - No authentication required - trust-based system
+   - Presence tracking begins immediately after username entry
+
+3. **Real-time Chat**
    - Shared chat room for all users
    - Instant message delivery to all connected users via PubSub
    - 500 most recent messages loaded on join
    - Infinite scroll for accessing older message history
    - Messages persisted to PostgreSQL
-   - Client-side throttling to prevent spam (500ms between messages)
+   - Input field cleared after each message
+   - Placeholder text "type your message here..." for better UX
 
-3. **Presence Tracking**
-   - Real-time online/offline status for all users
-   - Users become "online" after posting first message
+4. **Presence Tracking**
+   - Real-time online/offline status on both landing and chat pages
+   - Users become "online" upon successful username entry
+   - Both pages receive dynamic presence updates
    - Automatic presence updates when users join/leave
-   - Explicit leave button to untrack presence
+   - Explicit leave button to untrack presence and return home
 
-4. **Reconnection Recovery**
+5. **User List on Chat Page**
+   - View all users (online and offline) while chatting
+   - See total user count and online user count
+   - Real-time updates when users come online or go offline
+
+6. **Reconnection Recovery**
    - Automatic recovery of missed messages after disconnect
    - LiveView streams for memory-efficient message handling
 
 ### User Flow
 
-1. Visit home page with link to chat room
-2. Navigate to shared chat room
-3. Post first message with username to establish identity
+1. Visit landing page
+2. View list of all users with online/offline status
+3. Enter username in form
 4. System validates username not in use by online users
-5. View 500 most recent messages (infinite scroll for older)
-6. Send messages (throttled to prevent spam)
-7. Messages appear instantly for all users via LiveView streams
-8. See users come online when they post their first message
-9. Click Leave button to explicitly exit chat
+5. User created/retrieved and presence tracked immediately
+6. Navigate automatically to chat room
+7. View 500 most recent messages (infinite scroll for older)
+8. View all users with online/offline indicators in sidebar
+9. Send messages - input field clears after each message
+10. Messages appear instantly for all users via LiveView streams
+11. Both landing and chat pages update in real-time as users join/leave
+12. Click Leave button to untrack presence and return to landing page
 
 ## Technology Stack
 

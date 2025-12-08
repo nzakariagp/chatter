@@ -99,41 +99,55 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 ### 2. LiveView Layer
 
 #### ChatterWeb.HomeLive
-**Responsibility**: Landing page showing all users and their status
+**Responsibility**: Landing page with username entry and user list display
 
 **State**:
-- `users` - List of all users
-- `presence` - Map of online user IDs
+- `users` - List of all users (from database)
+- `online_users` - List of online usernames (from presence)
+- `username_form` - Form for username entry
+- `total_users` - Count of all registered users
+- `online_count` - Count of currently online users
 
 **Subscriptions**:
-- `"presence:lobby"` - Track user presence changes
+- `"chat:presence"` - Track user presence changes in real-time
 
 **Events**:
-- `"join_chat"` - User enters name and joins chat
+- `"set_username"` - User enters username, validates, creates/retrieves user
+  - Creates user if new
+  - Validates username not taken by online user
+  - Tracks presence immediately
+  - Navigates to chat room on success
 
 #### ChatterWeb.ChatLive
-**Responsibility**: Main chat room interface
+**Responsibility**: Main chat room interface with messaging and user list
 
 **State**:
-- `current_user` - Logged-in user struct
-- `messages` - List of chat messages
-- `users` - List of all users
-- `online_users` - Set of online user IDs
-- `message_form` - Form changeset for new messages
+- `current_user` - User struct (passed from session or URL params)
+- `messages` - Stream of chat messages (LiveView streams)
+- `users` - List of all users (from database)
+- `online_users` - List of online usernames (from presence)
+- `message_form` - Form for message input
+- `total_users` - Count of all registered users
+- `online_count` - Count of currently online users
 
 **Subscriptions**:
-- `"chat:lobby"` - New messages
-- `"presence:lobby"` - User presence changes
+- `"chat:lobby"` - New messages from all users
+- `"chat:presence"` - User presence changes in real-time
 
 **Events**:
 - `"send_message"` - User sends a message
+  - Creates and broadcasts message
+  - Clears input field after successful send
+  - Shows placeholder "type your message here..."
 - `"leave_chat"` - User leaves chat room
+  - Untracks presence
+  - Navigates to home page
 
 **Lifecycle**:
-1. `mount/3` - Load user, messages, track presence
-2. `handle_info/2` - Handle PubSub broadcasts
-3. `handle_event/3` - Handle user interactions
-4. `terminate/2` - Cleanup on disconnect
+1. `mount/3` - Load current user, messages (500 recent), all users, online users
+2. `handle_info/2` - Handle new messages and presence diffs
+3. `handle_event/3` - Handle send message and leave events
+4. `terminate/2` - Cleanup on disconnect (presence auto-untracks)
 
 ### 3. Presence System
 
@@ -196,25 +210,31 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 
 ### User Joins Chat
 ```
-1. User navigates to ChatLive (shared chat room URL)
-2. ChatLive mounts, subscribes to topics
-3. User posts first message with username
-4. System validates username availability (prevent reuse of online users)
-5. User record created/retrieved (offline users can be reused)
-6. Message created and user tracked in Presence
-7. Presence broadcasts presence_diff
-8. All clients receive update and re-render user list
+1. User navigates to HomeLive (landing page)
+2. HomeLive mounts, loads all users, subscribes to presence topic
+3. User sees list of all users with online/offline indicators
+4. User enters username in form on landing page
+5. System validates username availability (prevent reuse of online users)
+6. User record created/retrieved (offline users can be reused)
+7. User tracked in Presence immediately
+8. Presence broadcasts presence_diff to all subscribers
+9. HomeLive and ChatLive instances receive update and re-render user lists
+10. User navigates to ChatLive automatically
+11. ChatLive mounts with current user, loads messages and users
 ```
 
 ### Sending a Message
 ```
-1. User types message, submits form (client-side throttled)
-2. ChatLive.handle_event("send_message", ...) validates on submit
-3. Chatter.Chat.create_message(user, content)
-4. Message persisted to PostgreSQL
-5. Chatter.Chat.broadcast_message(message)
-6. All ChatLive processes receive {:new_message, message}
-7. Each process streams message (via LiveView streams), LiveView re-renders
+1. User types message in chat input field
+2. User submits form
+3. ChatLive.handle_event("send_message", ...) receives content
+4. Chatter.Chat.create_message(current_user, content)
+5. Message persisted to PostgreSQL
+6. Chatter.Chat.broadcast_message(message)
+7. All ChatLive processes receive {:new_message, message}
+8. Each process streams message (via LiveView streams)
+9. Sender's input field is cleared
+10. Placeholder "type your message here..." is restored
 ```
 
 ### User Goes Offline
@@ -223,8 +243,9 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 2. If Leave button: untrack presence explicitly, navigate to home
 3. If disconnect: LiveView process terminates automatically
 4. Presence automatically untracks user
-5. Presence broadcasts presence_diff
-6. All clients receive update and mark user offline
+5. Presence broadcasts presence_diff to all subscribers
+6. Both HomeLive and ChatLive instances receive update
+7. User lists on all pages update to show user as offline
 ```
 
 ### User Reconnects After Disconnect
