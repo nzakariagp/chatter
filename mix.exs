@@ -43,6 +43,7 @@ defmodule Chatter.MixProject do
       {:tidewave, "~> 0.4", only: [:dev]},
       {:usage_rules, "~> 0.1", only: [:dev]},
       {:claude, "~> 0.5", only: [:dev], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:phoenix, "~> 1.8.2"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
@@ -91,7 +92,13 @@ defmodule Chatter.MixProject do
         "esbuild chatter --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format --check-formatted",
+        "credo --strict",
+        "test"
+      ]
     ]
   end
 end

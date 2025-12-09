@@ -4,8 +4,8 @@ defmodule Chatter.Accounts do
   """
 
   import Ecto.Query, warn: false
-  alias Chatter.Repo
   alias Chatter.Accounts.User
+  alias Chatter.Repo
 
   @doc """
   Returns the list of users.

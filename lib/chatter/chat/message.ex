@@ -1,4 +1,7 @@
 defmodule Chatter.Chat.Message do
+  @moduledoc """
+  Schema for chat messages.
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

@@ -4,8 +4,8 @@ defmodule Chatter.Chat do
   """
 
   import Ecto.Query, warn: false
-  alias Chatter.Repo
   alias Chatter.Chat.Message
+  alias Chatter.Repo
 
   @topic "chat"
   @default_message_limit Application.compile_env(:chatter, :default_message_limit, 500)

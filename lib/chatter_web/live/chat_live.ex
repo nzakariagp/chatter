@@ -101,8 +101,8 @@ defmodule ChatterWeb.ChatLive do
     cond do
       diff_seconds < 60 -> "just now"
       diff_seconds < 3600 -> "#{div(diff_seconds, 60)}m ago"
-      diff_seconds < 86400 -> "#{div(diff_seconds, 3600)}h ago"
-      true -> "#{div(diff_seconds, 86400)}d ago"
+      diff_seconds < 86_400 -> "#{div(diff_seconds, 3600)}h ago"
+      true -> "#{div(diff_seconds, 86_400)}d ago"
     end
   end
 
