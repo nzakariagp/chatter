@@ -17,16 +17,22 @@ defmodule ChatterWeb.ChatLive do
         if connected?(socket) do
           Chat.subscribe()
           Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
+
+          Presence.track(self(), "chat:presence", user.id, %{
+            name: user.name,
+            joined_at: System.system_time(:second)
+          })
         end
 
         recent_messages = Chat.list_recent_messages(500)
         users = Accounts.list_users()
         online_users = get_online_usernames()
+        sorted_users = sort_users(users, online_users)
 
         {:ok,
          socket
          |> assign(:current_user, user)
-         |> assign(:users, users)
+         |> assign(:users, sorted_users)
          |> assign(:online_users, online_users)
          |> assign(:total_users, length(users))
          |> assign(:online_count, length(online_users))
@@ -69,10 +75,11 @@ defmodule ChatterWeb.ChatLive do
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     online_users = get_online_usernames()
     users = Accounts.list_users()
+    sorted_users = sort_users(users, online_users)
 
     {:noreply,
      socket
-     |> assign(:users, users)
+     |> assign(:users, sorted_users)
      |> assign(:online_users, online_users)
      |> assign(:total_users, length(users))
      |> assign(:online_count, length(online_users))}
@@ -82,6 +89,13 @@ defmodule ChatterWeb.ChatLive do
     Presence.list("chat:presence")
     |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
     |> Enum.sort()
+  end
+
+  defp sort_users(users, online_users) do
+    Enum.sort_by(users, fn user ->
+      is_online = user.name in online_users
+      {!is_online, user.name}
+    end)
   end
 
   defp format_timestamp(datetime) do
@@ -184,6 +198,7 @@ defmodule ChatterWeb.ChatLive do
         <div
           class="flex-1 overflow-y-auto p-5 space-y-3"
           id="messages-container"
+          phx-hook="ScrollToBottom"
           style="background: var(--industrial-bg);"
         >
           <div id="messages" phx-update="stream">
@@ -227,9 +242,11 @@ defmodule ChatterWeb.ChatLive do
         <div class="industrial-surface p-4 border-t" style="border-color: var(--industrial-border);">
           <.form for={@message_form} phx-submit="send_message" class="flex gap-2">
             <input
+              id="message-input"
               type="text"
               name="content"
-              value={@message_form.params["content"]}
+              value=""
+              phx-hook="ClearOnSubmit"
               placeholder="type your message here..."
               autocomplete="off"
               class="industrial-input flex-1 px-4 py-2.5 text-sm"

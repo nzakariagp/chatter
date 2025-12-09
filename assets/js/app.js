@@ -25,11 +25,35 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/chatter"
 import topbar from "../vendor/topbar"
 
+const Hooks = {}
+
+Hooks.ClearOnSubmit = {
+  mounted() {
+    this.el.form.addEventListener('submit', () => {
+      setTimeout(() => {
+        this.el.value = ''
+      }, 100)
+    })
+  }
+}
+
+Hooks.ScrollToBottom = {
+  mounted() {
+    this.scrollToBottom()
+  },
+  updated() {
+    this.scrollToBottom()
+  },
+  scrollToBottom() {
+    this.el.scrollTop = this.el.scrollHeight
+  }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ...Hooks},
 })
 
 // Show progress bar on live navigation and form submits

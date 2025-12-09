@@ -12,10 +12,11 @@ defmodule ChatterWeb.HomeLive do
 
     users = Accounts.list_users()
     online_users = get_online_usernames()
+    sorted_users = sort_users(users, online_users)
 
     {:ok,
      socket
-     |> assign(:users, users)
+     |> assign(:users, sorted_users)
      |> assign(:online_users, online_users)
      |> assign(:total_users, length(users))
      |> assign(:online_count, length(online_users))
@@ -44,10 +45,11 @@ defmodule ChatterWeb.HomeLive do
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     online_users = get_online_usernames()
     users = Accounts.list_users()
+    sorted_users = sort_users(users, online_users)
 
     {:noreply,
      socket
-     |> assign(:users, users)
+     |> assign(:users, sorted_users)
      |> assign(:online_users, online_users)
      |> assign(:total_users, length(users))
      |> assign(:online_count, length(online_users))}
@@ -57,6 +59,13 @@ defmodule ChatterWeb.HomeLive do
     Presence.list("chat:presence")
     |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
     |> Enum.sort()
+  end
+
+  defp sort_users(users, online_users) do
+    Enum.sort_by(users, fn user ->
+      is_online = user.name in online_users
+      {!is_online, user.name}
+    end)
   end
 
   defp validate_and_create_user(name, online_users) do
