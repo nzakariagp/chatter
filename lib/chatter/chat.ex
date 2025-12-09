@@ -8,6 +8,8 @@ defmodule Chatter.Chat do
   alias Chatter.Chat.Message
 
   @topic "chat"
+  @default_message_limit Application.compile_env(:chatter, :default_message_limit, 500)
+  @pagination_message_limit Application.compile_env(:chatter, :pagination_message_limit, 50)
 
   @doc """
   Returns the list of all messages, ordered by insertion time (oldest first).
@@ -27,7 +29,7 @@ defmodule Chatter.Chat do
 
   @doc """
   Returns the most recent N messages, ordered from oldest to newest.
-  Default limit is 500 messages.
+  Default limit is configured via :default_message_limit application config.
 
   ## Examples
 
@@ -35,7 +37,7 @@ defmodule Chatter.Chat do
       [%Message{}, ...]
 
   """
-  def list_recent_messages(limit \\ 500) do
+  def list_recent_messages(limit \\ @default_message_limit) do
     Message
     |> order_by([m], desc: m.inserted_at)
     |> limit(^limit)
@@ -47,6 +49,7 @@ defmodule Chatter.Chat do
   @doc """
   Returns messages created before a given message ID, for infinite scroll.
   Returns messages ordered from oldest to newest.
+  Default limit is configured via :pagination_message_limit application config.
 
   ## Examples
 
@@ -54,7 +57,8 @@ defmodule Chatter.Chat do
       [%Message{}, ...]
 
   """
-  def list_messages_before(message_id, limit \\ 50) when is_binary(message_id) do
+  def list_messages_before(message_id, limit \\ @pagination_message_limit)
+      when is_binary(message_id) do
     message = Repo.get!(Message, message_id)
 
     Message
@@ -89,6 +93,8 @@ defmodule Chatter.Chat do
   @doc """
   Creates a message.
 
+  Emits telemetry event [:chatter, :message, :created] on successful creation.
+
   ## Examples
 
       iex> create_message(user, %{content: "Hello!"})
@@ -99,9 +105,24 @@ defmodule Chatter.Chat do
 
   """
   def create_message(user, attrs \\ %{}) do
-    %Message{}
-    |> Message.changeset(Map.put(attrs, :user_id, user.id))
-    |> Repo.insert()
+    result =
+      %Message{}
+      |> Message.changeset(Map.put(attrs, :user_id, user.id))
+      |> Repo.insert()
+
+    case result do
+      {:ok, message} ->
+        :telemetry.execute(
+          [:chatter, :message, :created],
+          %{count: 1},
+          %{user_id: user.id}
+        )
+
+        {:ok, message}
+
+      error ->
+        error
+    end
   end
 
   @doc """

@@ -9,7 +9,9 @@ import Config
 
 config :chatter,
   ecto_repos: [Chatter.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  default_message_limit: 500,
+  pagination_message_limit: 50
 
 # Configure the endpoint
 config :chatter, ChatterWeb.Endpoint,

@@ -70,9 +70,14 @@ defmodule ChatterWeb.HomeLive do
 
   defp validate_and_create_user(name, online_users) do
     cond do
-      name == "" -> {:error, "Username cannot be empty"}
-      name in online_users -> {:error, "Username '#{name}' is already taken"}
-      true -> Accounts.get_or_create_user(name)
+      name == "" ->
+        {:error, "Username cannot be empty"}
+
+      name in online_users ->
+        {:error, "Username '#{name}' is currently online. Please choose a different name."}
+
+      true ->
+        Accounts.get_or_create_user(name)
     end
   end
 

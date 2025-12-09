@@ -6,38 +6,34 @@ defmodule ChatterWeb.ChatLive do
 
   @impl true
   def mount(params, _session, socket) do
-    # Get user from params or redirect to home
-    user_id = params["user_id"]
+    with user_id when not is_nil(user_id) <- params["user_id"],
+         user when not is_nil(user) <- Accounts.get_user(user_id) do
+      if connected?(socket) do
+        Chat.subscribe()
+        Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
 
-    case user_id && Accounts.get_user!(user_id) do
-      nil ->
-        {:ok, push_navigate(socket, to: ~p"/")}
+        Presence.track(self(), "chat:presence", user.id, %{
+          name: user.name,
+          joined_at: System.system_time(:second)
+        })
+      end
 
-      user ->
-        if connected?(socket) do
-          Chat.subscribe()
-          Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
+      recent_messages = Chat.list_recent_messages()
+      users = Accounts.list_users()
+      online_users = get_online_usernames()
+      sorted_users = sort_users(users, online_users)
 
-          Presence.track(self(), "chat:presence", user.id, %{
-            name: user.name,
-            joined_at: System.system_time(:second)
-          })
-        end
-
-        recent_messages = Chat.list_recent_messages(500)
-        users = Accounts.list_users()
-        online_users = get_online_usernames()
-        sorted_users = sort_users(users, online_users)
-
-        {:ok,
-         socket
-         |> assign(:current_user, user)
-         |> assign(:users, sorted_users)
-         |> assign(:online_users, online_users)
-         |> assign(:total_users, length(users))
-         |> assign(:online_count, length(online_users))
-         |> assign(:message_form, to_form(%{"content" => ""}))
-         |> stream(:messages, recent_messages)}
+      {:ok,
+       socket
+       |> assign(:current_user, user)
+       |> assign(:users, sorted_users)
+       |> assign(:online_users, online_users)
+       |> assign(:total_users, length(users))
+       |> assign(:online_count, length(online_users))
+       |> assign(:message_form, to_form(%{"content" => ""}))
+       |> stream(:messages, recent_messages)}
+    else
+      _ -> {:ok, push_navigate(socket, to: ~p"/")}
     end
   end
 
