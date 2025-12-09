@@ -94,6 +94,7 @@ defmodule Chatter.MixProject do
       ],
       precommit: [
         "compile --warnings-as-errors",
+        "xref graph --label compile-connected --fail-above 0",
         "deps.unlock --unused",
         "format --check-formatted",
         "credo --strict",
