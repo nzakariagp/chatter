@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(if [ -d .claude/agents ])",
+      "Bash(then echo 'Installed subagents:')",
+      "Bash(ls:*)",
+      "Bash(xargs:*)",
+      "Bash(else echo \"No subagents installed\")",
+      "Bash(fi)",
+      "Bash(if [ -f \".claude/settings.json\" ])",
+      "Bash(then echo \"Settings file exists:\")",
+      "Bash(cat:*)",
+      "Bash(else echo \"No local settings file\")",
+      "Bash(mix claude.install:*)"
+    ]
+  },
+  "disabledMcpjsonServers": [
+    "tidewave"
+  ]
+}
