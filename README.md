@@ -98,6 +98,15 @@ cd chatter
 # Install dependencies, create database, run migrations
 mix setup
 
+# Note: if you do not have a local Postgresql DB with Superuser privileges for your userid
+# make sure to uncomment and add the following environment variables to your shell 
+# (assumes ZSH or BASH)
+#export LOG_LEVEL="debug"
+#export MIX_TEST_PARTITION=1
+#export DATABASE_URL=ecto://postgres:postgres@localhost:5432/chatter_dev${MIX_TEST_PARTITION}
+#export TEST_DATABASE_URL=ecto://postgres:postgres@localhost:5432/chatter_test${MIX_TEST_PARTITION}
+
+
 # Start the Phoenix server
 mix phx.server
 ```
@@ -170,12 +179,14 @@ Comprehensive documentation is available in the `docs/` directory:
 ## Key Design Decisions
 
 ### Simplicity First
+
 - Single shared chat room (no multiple rooms or private messaging)
 - Minimal UI with inline Tailwind CSS
 - Identity-based system: users post with username to join
 - No authentication - trust-based username verification
 
 ### Real-time Architecture
+
 - Phoenix LiveView handles WebSocket connections automatically
 - Phoenix.Presence provides distributed, fault-tolerant user tracking
 - Phoenix.PubSub enables efficient message broadcasting
@@ -183,12 +194,14 @@ Comprehensive documentation is available in the `docs/` directory:
 - Client-side throttling (500ms) prevents message spam
 
 ### Data Model
+
 - UUIDs for primary keys (security and scalability)
 - Simple normalized schema (users and messages)
 - Indexed for common query patterns
 - DESC queries with limits for efficiency, reversed for display
 
 ### User Experience
+
 - Relative timestamps ("2 minutes ago")
 - Empty state messaging
 - Lonely user encouragement ("Tell your friends!")
@@ -196,6 +209,7 @@ Comprehensive documentation is available in the `docs/` directory:
 - Reconnection recovery for missed messages
 
 ### OTP Principles
+
 - Proper supervision tree with `:one_for_one` strategy
 - Each LiveView connection is an isolated process
 - Automatic cleanup on disconnection
@@ -203,12 +217,14 @@ Comprehensive documentation is available in the `docs/` directory:
 ## Assumptions and Limitations
 
 ### Key Assumptions
+
 - Expected scale: 100-1000 concurrent users
 - Single-node deployment (though design supports clustering)
 - Modern browsers with WebSocket support
 - All messages are public to all users
 
 ### Current Limitations
+
 - No message editing or deletion
 - No private messaging
 - No file uploads (text only)
@@ -230,6 +246,7 @@ mix claude.install          # Setup hooks, subagents, and MCP servers
 ```
 
 Custom slash commands available:
+
 - `/memory:*` - Memory management
 - `/mix:deps*` - Dependency management
 - `/elixir:*` - Elixir version management
@@ -248,6 +265,7 @@ Ready to run in production? See the [Phoenix deployment guides](https://hexdocs.
 ### Environment Variables
 
 Required for production:
+
 - `DATABASE_URL` - PostgreSQL connection string
 - `SECRET_KEY_BASE` - Secret key for encryption (generate with `mix phx.gen.secret`)
 - `PHX_HOST` - Hostname for URL generation
@@ -282,19 +300,22 @@ This is a demonstration project, but improvements are welcome:
 ## Learn More
 
 ### Phoenix Framework
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+
+* Official website: <https://www.phoenixframework.org/>
+- Guides: <https://hexdocs.pm/phoenix/overview.html>
+- Docs: <https://hexdocs.pm/phoenix>
+- Forum: <https://elixirforum.com/c/phoenix-forum>
+- Source: <https://github.com/phoenixframework/phoenix>
 
 ### Phoenix LiveView
-* Docs: https://hexdocs.pm/phoenix_live_view
-* Guide: https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.html
+
+* Docs: <https://hexdocs.pm/phoenix_live_view>
+- Guide: <https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.html>
 
 ### Phoenix Presence
-* Docs: https://hexdocs.pm/phoenix/Phoenix.Presence.html
-* Guide: https://hexdocs.pm/phoenix/presence.html
+
+* Docs: <https://hexdocs.pm/phoenix/Phoenix.Presence.html>
+- Guide: <https://hexdocs.pm/phoenix/presence.html>
 
 ## License
 
