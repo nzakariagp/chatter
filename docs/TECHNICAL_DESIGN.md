@@ -96,23 +96,65 @@ defmodule Chatter.Accounts do
 
   @doc """
   Creates a user with the given attributes.
+  Emits telemetry event [:chatter, :user, :created] on successful creation.
   Returns {:ok, user} or {:error, changeset}.
   """
   def create_user(attrs \\ %{}) do
-    %User{}
-    |> User.changeset(attrs)
-    |> Repo.insert()
+    result =
+      %User{}
+      |> User.changeset(attrs)
+      |> Repo.insert()
+
+    case result do
+      {:ok, user} ->
+        :telemetry.execute(
+          [:chatter, :user, :created],
+          %{count: 1},
+          %{user_id: user.id}
+        )
+        {:ok, user}
+
+      error ->
+        error
+    end
   end
 
   @doc """
-  Gets or creates a user by name.
-  Returns {:ok, user} or {:error, changeset}.
+  Gets a single user by ID.
+  Returns nil if user doesn't exist.
   """
-  def get_or_create_user(name) do
+  def get_user(id), do: Repo.get(User, id)
+
+  @doc """
+  Gets or creates a user by name.
+  Handles race conditions via database unique constraint.
+  Always returns {:ok, user}.
+  """
+  def get_or_create_user(name) when is_binary(name) do
     case get_user_by_name(name) do
-      nil -> create_user(%{name: name})
-      user -> {:ok, user}
+      nil ->
+        case create_user(%{name: name}) do
+          {:ok, user} -> {:ok, user}
+          {:error, changeset} -> handle_create_user_error(changeset, name)
+        end
+
+      user ->
+        {:ok, user}
     end
+  end
+
+  defp handle_create_user_error(changeset, name) do
+    if unique_constraint_violated?(changeset, :name) do
+      {:ok, get_user_by_name(name)}
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp unique_constraint_violated?(changeset, field) do
+    Enum.any?(changeset.errors, fn {f, {_msg, opts}} ->
+      f == field && Keyword.get(opts, :constraint) == :unique
+    end)
   end
 end
 ```
@@ -130,9 +172,7 @@ defmodule Chatter.Accounts.User do
   schema "users" do
     field :name, :string
 
-    has_many :messages, Chatter.Chat.Message
-
-    timestamps(type: :utc_datetime)
+    timestamps(type: :utc_datetime_usec)
   end
 
   @doc false
@@ -142,7 +182,7 @@ defmodule Chatter.Accounts.User do
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 50)
     |> validate_format(:name, ~r/^[a-zA-Z0-9_-]+$/,
-      message: "must contain only letters, numbers, underscores, and hyphens"
+      message: "can only contain letters, numbers, underscores, and hyphens"
     )
     |> unique_constraint(:name)
   end
@@ -173,8 +213,9 @@ defmodule Chatter.Chat do
   alias Chatter.Chat.Message
   alias Chatter.Accounts.User
 
-  @pubsub Chatter.PubSub
-  @topic "chat:lobby"
+  @topic "chat"
+  @default_message_limit Application.compile_env(:chatter, :default_message_limit, 500)
+  @pagination_message_limit Application.compile_env(:chatter, :pagination_message_limit, 50)
 
   @doc """
   Returns all messages with users preloaded, ordered chronologically.
@@ -189,8 +230,9 @@ defmodule Chatter.Chat do
   @doc """
   Returns the N most recent messages.
   Queries in DESC order with limit for efficiency, then reverses for chronological display.
+  Default limit is configured via :default_message_limit application config.
   """
-  def list_recent_messages(limit \\ 500) do
+  def list_recent_messages(limit \\ @default_message_limit) do
     Message
     |> order_by([m], desc: m.inserted_at)
     |> limit(^limit)
@@ -201,8 +243,11 @@ defmodule Chatter.Chat do
 
   @doc """
   Returns messages older than the given message ID for infinite scroll.
+  Returns messages ordered from oldest to newest.
+  Default limit is configured via :pagination_message_limit application config.
   """
-  def list_messages_before(message_id, limit \\ 100) do
+  def list_messages_before(message_id, limit \\ @pagination_message_limit)
+      when is_binary(message_id) do
     message = Repo.get!(Message, message_id)
 
     Message
@@ -215,28 +260,55 @@ defmodule Chatter.Chat do
   end
 
   @doc """
-  Creates a message for the given user.
+  Returns messages created after a given message ID, for reconnection recovery.
+  Returns messages ordered from oldest to newest.
   """
-  def create_message(%User{} = user, attrs \\ %{}) do
-    %Message{}
-    |> Message.changeset(attrs)
-    |> Ecto.Changeset.put_assoc(:user, user)
-    |> Repo.insert()
+  def list_messages_after(message_id) when is_binary(message_id) do
+    message = Repo.get!(Message, message_id)
+
+    Message
+    |> where([m], m.inserted_at > ^message.inserted_at)
+    |> order_by([m], asc: m.inserted_at)
+    |> preload(:user)
+    |> Repo.all()
+  end
+
+  @doc """
+  Creates a message for the given user.
+  Emits telemetry event [:chatter, :message, :created] on successful creation.
+  """
+  def create_message(user, attrs \\ %{}) do
+    result =
+      %Message{}
+      |> Message.changeset(Map.put(attrs, :user_id, user.id))
+      |> Repo.insert()
+
+    case result do
+      {:ok, message} ->
+        :telemetry.execute(
+          [:chatter, :message, :created],
+          %{count: 1},
+          %{user_id: user.id}
+        )
+        {:ok, message}
+
+      error ->
+        error
+    end
   end
 
   @doc """
   Broadcasts a new message to all subscribers.
   """
-  def broadcast_message(%Message{} = message) do
-    message = Repo.preload(message, :user)
-    Phoenix.PubSub.broadcast(@pubsub, @topic, {:new_message, message})
+  def broadcast_message(message) do
+    Phoenix.PubSub.broadcast(Chatter.PubSub, @topic, {:new_message, message})
   end
 
   @doc """
   Subscribes the current process to chat messages.
   """
   def subscribe do
-    Phoenix.PubSub.subscribe(@pubsub, @topic)
+    Phoenix.PubSub.subscribe(Chatter.PubSub, @topic)
   end
 end
 ```
@@ -256,7 +328,7 @@ defmodule Chatter.Chat.Message do
 
     belongs_to :user, Chatter.Accounts.User
 
-    timestamps(type: :utc_datetime)
+    timestamps(type: :utc_datetime_usec)
   end
 
   @doc false
@@ -291,19 +363,18 @@ end
 **Configuration**:
 - OTP app: `:chatter`
 - PubSub server: `Chatter.PubSub`
-- Topic: `"presence:lobby"`
+- Topic: `"chat:presence"`
 
 **Usage Pattern**:
 ```elixir
 # Track user
-ChatterWeb.Presence.track(self(), "presence:lobby", user.id, %{
-  user_id: user.id,
+ChatterWeb.Presence.track(self(), "chat:presence", user.id, %{
   name: user.name,
   joined_at: System.system_time(:second)
 })
 
 # List presences
-ChatterWeb.Presence.list("presence:lobby")
+ChatterWeb.Presence.list("chat:presence")
 
 # Handle presence diff
 def handle_info(%{event: "presence_diff"}, socket) do
@@ -336,10 +407,11 @@ defmodule ChatterWeb.HomeLive do
 
     users = Accounts.list_users()
     online_users = get_online_usernames()
+    sorted_users = sort_users(users, online_users)
 
     {:ok,
      socket
-     |> assign(:users, users)
+     |> assign(:users, sorted_users)
      |> assign(:online_users, online_users)
      |> assign(:total_users, length(users))
      |> assign(:online_count, length(online_users))
@@ -357,7 +429,7 @@ defmodule ChatterWeb.HomeLive do
           joined_at: System.system_time(:second)
         })
 
-        {:noreply, push_navigate(socket, to: ~p"/chat")}
+        {:noreply, push_navigate(socket, to: ~p"/chat?user_id=#{user.id}")}
 
       {:error, message} ->
         {:noreply, put_flash(socket, :error, message)}
@@ -365,13 +437,14 @@ defmodule ChatterWeb.HomeLive do
   end
 
   @impl true
-  def handle_info(%{event: "presence_diff"}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     online_users = get_online_usernames()
     users = Accounts.list_users()
+    sorted_users = sort_users(users, online_users)
 
     {:noreply,
      socket
-     |> assign(:users, users)
+     |> assign(:users, sorted_users)
      |> assign(:online_users, online_users)
      |> assign(:total_users, length(users))
      |> assign(:online_count, length(online_users))}
@@ -383,11 +456,23 @@ defmodule ChatterWeb.HomeLive do
     |> Enum.sort()
   end
 
+  defp sort_users(users, online_users) do
+    Enum.sort_by(users, fn user ->
+      is_online = user.name in online_users
+      {!is_online, user.name}
+    end)
+  end
+
   defp validate_and_create_user(name, online_users) do
     cond do
-      name == "" -> {:error, "Username cannot be empty"}
-      name in online_users -> {:error, "Username '#{name}' is already taken"}
-      true -> Accounts.get_or_create_user(name)
+      name == "" ->
+        {:error, "Username cannot be empty"}
+
+      name in online_users ->
+        {:error, "Username '#{name}' is currently online. Please choose a different name."}
+
+      true ->
+        Accounts.get_or_create_user(name)
     end
   end
 end
@@ -411,9 +496,9 @@ end
 
 **Purpose**: Main chat room with messages and user list
 
-**Route**: `/chat`
+**Route**: `/chat` (with query parameter `?user_id=<uuid>`)
 
-**Template**: `chat_live.html.heex`
+**Template**: Inline render function
 
 ```elixir
 defmodule ChatterWeb.ChatLive do
@@ -422,38 +507,48 @@ defmodule ChatterWeb.ChatLive do
   alias Chatter.{Accounts, Chat}
   alias ChatterWeb.Presence
 
-  @presence_topic "presence:lobby"
-
   @impl true
-  def mount(_params, _session, socket) do
-    if connected?(socket) do
-      Chat.subscribe()
-      Phoenix.PubSub.subscribe(Chatter.PubSub, @presence_topic)
+  def mount(params, _session, socket) do
+    with user_id when not is_nil(user_id) <- params["user_id"],
+         user when not is_nil(user) <- Accounts.get_user(user_id) do
+      if connected?(socket) do
+        Chat.subscribe()
+        Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
+
+        Presence.track(self(), "chat:presence", user.id, %{
+          name: user.name,
+          joined_at: System.system_time(:second)
+        })
+      end
+
+      recent_messages = Chat.list_recent_messages()
+      users = Accounts.list_users()
+      online_users = get_online_usernames()
+      sorted_users = sort_users(users, online_users)
+
+      {:ok,
+       socket
+       |> assign(:current_user, user)
+       |> assign(:users, sorted_users)
+       |> assign(:online_users, online_users)
+       |> assign(:total_users, length(users))
+       |> assign(:online_count, length(online_users))
+       |> assign(:message_form, to_form(%{"content" => ""}))
+       |> stream(:messages, recent_messages)}
+    else
+      _ -> {:ok, push_navigate(socket, to: ~p"/")}
     end
-
-    messages = Chat.list_recent_messages(500)
-    users = Accounts.list_users()
-    online_users = get_online_user_ids()
-
-    {:ok,
-     socket
-     |> assign(:current_user, nil)
-     |> assign(:users, users)
-     |> assign(:online_users, online_users)
-     |> assign(:latest_message_id, get_latest_message_id(messages))
-     |> stream(:messages, messages)
-     |> assign(:form, to_form(%{"username" => "", "content" => ""}))}
   end
 
   @impl true
   def handle_event("send_message", %{"content" => content}, socket) do
     content = String.trim(content)
 
-    if socket.assigns.current_user && content != "" do
+    if content != "" do
       case Chat.create_message(socket.assigns.current_user, %{content: content}) do
         {:ok, message} ->
+          message = Chatter.Repo.preload(message, :user)
           Chat.broadcast_message(message)
-          # Clear input field and restore placeholder
           {:noreply, assign(socket, :message_form, to_form(%{"content" => ""}))}
 
         {:error, _changeset} ->
@@ -465,76 +560,75 @@ defmodule ChatterWeb.ChatLive do
   end
 
   @impl true
-  def handle_event("load_more", _params, socket) do
-    # Infinite scroll: load older messages
-    oldest_message_id = get_oldest_message_id_from_stream(socket)
-
-    if oldest_message_id do
-      older_messages = Chat.list_messages_before(oldest_message_id, 100)
-      {:noreply, stream(socket, :messages, older_messages, at: 0)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
   def handle_event("leave", _params, socket) do
-    # Untrack presence and navigate home
-    if socket.assigns.current_user do
-      Presence.untrack(self(), @presence_topic, socket.assigns.current_user.id)
-    end
-
+    Presence.untrack(self(), "chat:presence", socket.assigns.current_user.id)
     {:noreply, push_navigate(socket, to: ~p"/")}
   end
 
   @impl true
   def handle_info({:new_message, message}, socket) do
-    {:noreply,
-     socket
-     |> stream_insert(:messages, message)
-     |> assign(:latest_message_id, message.id)}
+    {:noreply, stream_insert(socket, :messages, message)}
   end
 
   @impl true
-  def handle_info(%{event: "presence_diff"}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     online_users = get_online_usernames()
     users = Accounts.list_users()
+    sorted_users = sort_users(users, online_users)
 
     {:noreply,
      socket
-     |> assign(:users, users)
+     |> assign(:users, sorted_users)
      |> assign(:online_users, online_users)
      |> assign(:total_users, length(users))
      |> assign(:online_count, length(online_users))}
   end
 
   defp get_online_usernames do
-    Presence.list(@presence_topic)
+    Presence.list("chat:presence")
     |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
     |> Enum.sort()
   end
 
-  defp get_latest_message_id([]), do: nil
-  defp get_latest_message_id(messages), do: List.last(messages).id
+  defp sort_users(users, online_users) do
+    Enum.sort_by(users, fn user ->
+      is_online = user.name in online_users
+      {!is_online, user.name}
+    end)
+  end
+
+  defp format_timestamp(datetime) do
+    now = DateTime.utc_now()
+    diff_seconds = DateTime.diff(now, datetime, :second)
+
+    cond do
+      diff_seconds < 60 -> "just now"
+      diff_seconds < 3600 -> "#{div(diff_seconds, 60)}m ago"
+      diff_seconds < 86_400 -> "#{div(diff_seconds, 3600)}h ago"
+      true -> "#{div(diff_seconds, 86_400)}d ago"
+    end
+  end
 end
 ```
 
 **State**:
-- `current_user` - The identified user (retrieved from session/params, already authenticated from HomeLive)
+- `current_user` - User struct retrieved from query parameter user_id
 - `messages` - Stream of chat messages (LiveView streams)
-- `users` - All registered users from database
+- `users` - All registered users from database, sorted (online first)
 - `online_users` - List of online usernames from presence
 - `total_users` - Count of all registered users
 - `online_count` - Count of currently online users
-- `latest_message_id` - For reconnection recovery
-- `message_form` - Form for message input only (username already set)
+- `message_form` - Form for message input
 
 **Events**:
-- `send_message` - User sends message (current_user already set)
+- `send_message` - User sends message
+  - Creates message in database
+  - Preloads user association
+  - Broadcasts to all connected clients
   - Clears input field after successful send
-  - Restores placeholder "type your message here..."
-- `load_more` - Infinite scroll trigger for older messages
-- `leave` - User explicitly leaves chat (untracks presence, navigates home)
+- `leave` - User explicitly leaves chat
+  - Untracks presence
+  - Navigates to home page
 
 **Info Messages**:
 - `{:new_message, message}` - From PubSub when anyone sends a message
@@ -567,7 +661,7 @@ defmodule ChatterWeb.Router do
     pipe_through :browser
 
     live "/", HomeLive
-    live "/chat/:user_id", ChatLive
+    live "/chat", ChatLive
   end
 
   # Development routes
@@ -596,7 +690,7 @@ defmodule Chatter.Repo.Migrations.CreateUsers do
       add :id, :binary_id, primary_key: true
       add :name, :string, null: false
 
-      timestamps(type: :utc_datetime)
+      timestamps(type: :utc_datetime_usec)
     end
 
     create unique_index(:users, [:name])
@@ -616,7 +710,7 @@ defmodule Chatter.Repo.Migrations.CreateMessages do
       add :content, :text, null: false
       add :user_id, references(:users, type: :binary_id, on_delete: :nothing), null: false
 
-      timestamps(type: :utc_datetime)
+      timestamps(type: :utc_datetime_usec)
     end
 
     create index(:messages, [:user_id])

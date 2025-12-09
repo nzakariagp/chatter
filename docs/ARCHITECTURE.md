@@ -131,7 +131,7 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 - `online_count` - Count of currently online users
 
 **Subscriptions**:
-- `"chat:lobby"` - New messages from all users
+- `"chat"` - New messages from all users
 - `"chat:presence"` - User presence changes in real-time
 
 **Events**:
@@ -154,7 +154,7 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 #### Phoenix.Presence
 **Implementation**: `ChatterWeb.Presence`
 
-**Topic**: `"presence:lobby"`
+**Topic**: `"chat:presence"`
 
 **Tracking**:
 - Track user when they join chat
@@ -170,12 +170,12 @@ Chatter is a real-time chat application demonstrating Elixir/OTP concepts, Phoen
 
 **Topics**:
 
-1. **`"chat:lobby"`** - Chat message broadcasts
+1. **`"chat"`** - Chat message broadcasts
    - Published when: New message created
    - Payload: `{:new_message, message_struct}`
    - Subscribers: All ChatLive processes
 
-2. **`"presence:lobby"`** - User presence updates
+2. **`"chat:presence"`** - User presence updates
    - Published by: Phoenix.Presence automatically
    - Payload: `%Phoenix.Socket.Broadcast{event: "presence_diff", ...}`
    - Subscribers: All HomeLive and ChatLive processes

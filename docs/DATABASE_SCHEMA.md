@@ -42,8 +42,8 @@ Stores all registered chat users.
 |--------|------|-------------|-------------|
 | id | binary_id (UUID) | PRIMARY KEY | Unique identifier |
 | name | string (VARCHAR 255) | UNIQUE, NOT NULL | Username for display |
-| inserted_at | utc_datetime | NOT NULL | Record creation timestamp |
-| updated_at | utc_datetime | NOT NULL | Record update timestamp |
+| inserted_at | utc_datetime_usec | NOT NULL | Record creation timestamp (microsecond precision) |
+| updated_at | utc_datetime_usec | NOT NULL | Record update timestamp (microsecond precision) |
 
 **Indexes**:
 - `PRIMARY KEY (id)` - Clustered index on UUID
@@ -58,9 +58,7 @@ Stores all registered chat users.
 schema "users" do
   field :name, :string
 
-  has_many :messages, Chatter.Chat.Message
-
-  timestamps(type: :utc_datetime)
+  timestamps(type: :utc_datetime_usec)
 end
 ```
 
@@ -82,8 +80,8 @@ Stores all chat messages with reference to the sending user.
 | id | binary_id (UUID) | PRIMARY KEY | Unique identifier |
 | content | text | NOT NULL | Message content |
 | user_id | binary_id (UUID) | FOREIGN KEY, NOT NULL | Reference to users table |
-| inserted_at | utc_datetime | NOT NULL | Message creation timestamp |
-| updated_at | utc_datetime | NOT NULL | Message update timestamp |
+| inserted_at | utc_datetime_usec | NOT NULL | Message creation timestamp (microsecond precision) |
+| updated_at | utc_datetime_usec | NOT NULL | Message update timestamp (microsecond precision) |
 
 **Indexes**:
 - `PRIMARY KEY (id)` - Clustered index on UUID
@@ -101,7 +99,7 @@ schema "messages" do
 
   belongs_to :user, Chatter.Accounts.User
 
-  timestamps(type: :utc_datetime)
+  timestamps(type: :utc_datetime_usec)
 end
 ```
 
@@ -130,7 +128,7 @@ defmodule Chatter.Repo.Migrations.CreateUsers do
       add :id, :binary_id, primary_key: true
       add :name, :string, null: false
 
-      timestamps(type: :utc_datetime)
+      timestamps(type: :utc_datetime_usec)
     end
 
     create unique_index(:users, [:name])
@@ -154,7 +152,7 @@ defmodule Chatter.Repo.Migrations.CreateMessages do
       add :content, :text, null: false
       add :user_id, references(:users, type: :binary_id, on_delete: :nothing), null: false
 
-      timestamps(type: :utc_datetime)
+      timestamps(type: :utc_datetime_usec)
     end
 
     create index(:messages, [:user_id])
