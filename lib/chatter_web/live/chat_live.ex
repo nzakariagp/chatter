@@ -5,53 +5,33 @@ defmodule ChatterWeb.ChatLive do
   alias ChatterWeb.Presence
 
   @impl true
-  def mount(_params, _session, socket) do
-    if connected?(socket) do
-      Chat.subscribe()
-      Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
-    end
+  def mount(params, _session, socket) do
+    # Get user from params or redirect to home
+    user_id = params["user_id"]
 
-    recent_messages = Chat.list_recent_messages(500)
+    case user_id && Accounts.get_user!(user_id) do
+      nil ->
+        {:ok, push_navigate(socket, to: ~p"/")}
 
-    socket =
-      socket
-      |> assign(:current_user, nil)
-      |> assign(:message_form, to_form(%{"content" => ""}))
-      |> assign(:username_form, to_form(%{"name" => ""}))
-      |> assign(:online_users, [])
-      |> assign(:show_username_input, true)
-      |> stream(:messages, recent_messages)
-
-    {:ok, socket}
-  end
-
-  @impl true
-  def handle_event("set_username", %{"name" => name}, socket) do
-    name = String.trim(name)
-
-    case validate_username(name, socket.assigns.online_users) do
-      :ok ->
-        case Accounts.get_or_create_user(name) do
-          {:ok, user} ->
-            Presence.track(self(), "chat:presence", user.id, %{
-              name: user.name,
-              joined_at: System.system_time(:second)
-            })
-
-            socket =
-              socket
-              |> assign(:current_user, user)
-              |> assign(:show_username_input, false)
-              |> put_flash(:info, "Welcome, #{user.name}!")
-
-            {:noreply, socket}
-
-          {:error, _changeset} ->
-            {:noreply, put_flash(socket, :error, "Invalid username")}
+      user ->
+        if connected?(socket) do
+          Chat.subscribe()
+          Phoenix.PubSub.subscribe(Chatter.PubSub, "chat:presence")
         end
 
-      {:error, message} ->
-        {:noreply, put_flash(socket, :error, message)}
+        recent_messages = Chat.list_recent_messages(500)
+        users = Accounts.list_users()
+        online_users = get_online_usernames()
+
+        {:ok,
+         socket
+         |> assign(:current_user, user)
+         |> assign(:users, users)
+         |> assign(:online_users, online_users)
+         |> assign(:total_users, length(users))
+         |> assign(:online_count, length(online_users))
+         |> assign(:message_form, to_form(%{"content" => ""}))
+         |> stream(:messages, recent_messages)}
     end
   end
 
@@ -59,7 +39,7 @@ defmodule ChatterWeb.ChatLive do
   def handle_event("send_message", %{"content" => content}, socket) do
     content = String.trim(content)
 
-    if socket.assigns.current_user && content != "" do
+    if content != "" do
       case Chat.create_message(socket.assigns.current_user, %{content: content}) do
         {:ok, message} ->
           message = Chatter.Repo.preload(message, :user)
@@ -76,10 +56,7 @@ defmodule ChatterWeb.ChatLive do
 
   @impl true
   def handle_event("leave", _params, socket) do
-    if socket.assigns.current_user do
-      Presence.untrack(self(), "chat:presence", socket.assigns.current_user.id)
-    end
-
+    Presence.untrack(self(), "chat:presence", socket.assigns.current_user.id)
     {:noreply, push_navigate(socket, to: ~p"/")}
   end
 
@@ -90,22 +67,21 @@ defmodule ChatterWeb.ChatLive do
 
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
-    online_users =
-      Presence.list("chat:presence")
-      |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
-      |> Enum.sort()
+    online_users = get_online_usernames()
+    users = Accounts.list_users()
 
-    {:noreply, assign(socket, :online_users, online_users)}
+    {:noreply,
+     socket
+     |> assign(:users, users)
+     |> assign(:online_users, online_users)
+     |> assign(:total_users, length(users))
+     |> assign(:online_count, length(online_users))}
   end
 
-  defp validate_username("", _online_users), do: {:error, "Username cannot be empty"}
-
-  defp validate_username(name, online_users) do
-    if name in online_users do
-      {:error, "Username '#{name}' is already taken by an online user"}
-    else
-      :ok
-    end
+  defp get_online_usernames do
+    Presence.list("chat:presence")
+    |> Enum.map(fn {_id, %{metas: [meta | _]}} -> meta.name end)
+    |> Enum.sort()
   end
 
   defp format_timestamp(datetime) do
@@ -141,30 +117,50 @@ defmodule ChatterWeb.ChatLive do
         </div>
 
         <div class="flex-1 overflow-y-auto p-4">
-          <div class="mb-3 flex items-center justify-between">
-            <h3 class="text-xs font-semibold industrial-text-dim code-text uppercase tracking-wider">
-              Online Users
-            </h3>
-            <span class="industrial-badge">{length(@online_users)}</span>
+          <div class="mb-3">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold industrial-text-dim code-text uppercase tracking-wider">
+                Users
+              </h3>
+              <div class="flex items-center gap-2 text-xs code-text">
+                <div class="flex items-center gap-1">
+                  <div class="status-indicator"></div>
+                  <span class="industrial-accent-green">{@online_count}</span>
+                </div>
+                <span class="industrial-text-dim">/ {@total_users}</span>
+              </div>
+            </div>
+            <p class="text-xs industrial-text-dim code-text">
+              Real-time presence
+            </p>
           </div>
           <div class="space-y-1">
-            <%= if @online_users == [] do %>
+            <%= if @users == [] do %>
               <p class="text-xs industrial-text-dim code-text italic py-2">
-                No users connected
+                No users yet
               </p>
             <% else %>
-              <%= for username <- @online_users do %>
+              <%= for user <- @users do %>
                 <div
                   class="flex items-center gap-2 p-2 rounded transition-all"
                   style="background: var(--industrial-elevated);"
                 >
-                  <div class="status-indicator"></div>
-                  <span class={"text-sm code-text #{if @current_user && @current_user.name == username, do: "industrial-accent-orange", else: "industrial-text"}"}>
-                    {username}
-                    <%= if @current_user && @current_user.name == username do %>
-                      <span class="text-xs industrial-text-dim">(you)</span>
-                    <% end %>
-                  </span>
+                  <%= if user.name in @online_users do %>
+                    <div class="status-indicator"></div>
+                    <span class={"text-sm code-text #{if @current_user.name == user.name, do: "industrial-accent-orange font-semibold", else: "industrial-text"}"}>
+                      {user.name}
+                      <%= if @current_user.name == user.name do %>
+                        <span class="text-xs industrial-text-dim ml-1">(you)</span>
+                      <% end %>
+                    </span>
+                  <% else %>
+                    <div
+                      class="w-2 h-2 rounded-full"
+                      style="background: var(--industrial-text-dim); opacity: 0.3;"
+                    >
+                    </div>
+                    <span class="text-sm code-text industrial-text-dim">{user.name}</span>
+                  <% end %>
                 </div>
               <% end %>
             <% end %>
@@ -229,41 +225,20 @@ defmodule ChatterWeb.ChatLive do
         </div>
 
         <div class="industrial-surface p-4 border-t" style="border-color: var(--industrial-border);">
-          <%= if @show_username_input do %>
-            <.form for={@username_form} phx-submit="set_username" class="space-y-3">
-              <div>
-                <label class="block text-xs font-semibold mb-2 industrial-text-dim code-text uppercase tracking-wider">
-                  Enter Username
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  placeholder="Your username..."
-                  autocomplete="off"
-                  class="industrial-input w-full px-4 py-2.5 text-sm"
-                  required
-                />
-              </div>
-              <button type="submit" class="industrial-button w-full py-2.5 px-6 text-sm">
-                Connect to Chat →
-              </button>
-            </.form>
-          <% else %>
-            <.form for={@message_form} phx-submit="send_message" class="flex gap-2">
-              <input
-                type="text"
-                name="content"
-                value={@message_form.params["content"]}
-                placeholder="Type a message..."
-                autocomplete="off"
-                class="industrial-input flex-1 px-4 py-2.5 text-sm"
-                required
-              />
-              <button type="submit" class="industrial-button py-2.5 px-6 text-sm">
-                Send →
-              </button>
-            </.form>
-          <% end %>
+          <.form for={@message_form} phx-submit="send_message" class="flex gap-2">
+            <input
+              type="text"
+              name="content"
+              value={@message_form.params["content"]}
+              placeholder="type your message here..."
+              autocomplete="off"
+              class="industrial-input flex-1 px-4 py-2.5 text-sm"
+              required
+            />
+            <button type="submit" class="industrial-button py-2.5 px-6 text-sm">
+              Send →
+            </button>
+          </.form>
         </div>
       </div>
     </div>

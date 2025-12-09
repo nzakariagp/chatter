@@ -4,6 +4,6 @@ defmodule ChatterWeb.PageControllerTest do
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")
     assert html_response(conn, 200) =~ "Chatter"
-    assert html_response(conn, 200) =~ "Start Chatting"
+    assert html_response(conn, 200) =~ "Join Chat"
   end
 end
